@@ -24,12 +24,7 @@ npm run build
 ```bash
 export TRELLO_API_KEY="..."
 export TRELLO_TOKEN="..."
-export TRELLO_DEFAULT_BOARD_ID="..."
 ```
-
-`TRELLO_DEFAULT_BOARD_ID` é opcional. Ele pode ser o `id` completo do board
-retornado por `trello_list_boards` ou o shortLink da URL do quadro, como
-`abcDEF12` em `https://trello.com/b/abcDEF12/nome-do-quadro`.
 
 ## Uso com cliente MCP
 
@@ -43,8 +38,7 @@ Exemplo de configuração:
       "args": ["/caminho/para/trello-mcp/dist/index.js"],
       "env": {
         "TRELLO_API_KEY": "sua_api_key",
-        "TRELLO_TOKEN": "seu_token",
-        "TRELLO_DEFAULT_BOARD_ID": "id_ou_shortlink_do_quadro"
+        "TRELLO_TOKEN": "seu_token"
       }
     }
   }
@@ -54,10 +48,10 @@ Exemplo de configuração:
 ## Ferramentas disponíveis
 
 - `trello_list_boards`: lista seus boards
-- `trello_get_board`: busca detalhes de um board; usa `TRELLO_DEFAULT_BOARD_ID` se `boardId` não for informado
-- `trello_list_lists`: lista listas de um board; usa `TRELLO_DEFAULT_BOARD_ID` se `boardId` não for informado
-- `trello_create_list`: cria uma lista em um board; usa `TRELLO_DEFAULT_BOARD_ID` se `boardId` não for informado
-- `trello_list_cards`: lista cards de um board ou lista; usa `TRELLO_DEFAULT_BOARD_ID` se `boardId` e `listId` não forem informados
+- `trello_get_board`: busca detalhes de um board
+- `trello_list_lists`: lista listas de um board
+- `trello_create_list`: cria uma lista em um board
+- `trello_list_cards`: lista cards de um board ou lista
 - `trello_get_card`: busca detalhes de um card
 - `trello_create_card`: cria um card
 - `trello_update_card`: atualiza nome, descrição, lista, vencimento ou status de um card
