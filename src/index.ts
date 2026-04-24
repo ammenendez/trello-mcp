@@ -33,6 +33,18 @@ function getCredentials() {
   return { key, token };
 }
 
+function resolveBoardId(boardId?: string) {
+  const resolvedBoardId = boardId || process.env.TRELLO_DEFAULT_BOARD_ID;
+
+  if (!resolvedBoardId) {
+    throw new TrelloError(
+      "Provide boardId or set TRELLO_DEFAULT_BOARD_ID in the project environment.",
+    );
+  }
+
+  return resolvedBoardId;
+}
+
 function compactJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
@@ -144,7 +156,7 @@ server.tool(
   "trello_get_board",
   "Get one Trello board with optional related lists, cards, labels, and members.",
   {
-    boardId: idSchema,
+    boardId: idSchema.optional(),
     fields: z.string().default("name,desc,url,closed,dateLastActivity,labelNames"),
     lists: z.enum(["all", "closed", "none", "open"]).default("open"),
     cards: z.enum(["all", "closed", "none", "open", "visible"]).default("open"),
@@ -152,50 +164,56 @@ server.tool(
     members: z.enum(["all", "none"]).default("none"),
   },
   async ({ boardId, fields, lists, cards, labels, members }) =>
-    runTool(() =>
-      trelloRequest("GET", `/boards/${encodeURIComponent(boardId)}`, {
+    runTool(() => {
+      const resolvedBoardId = resolveBoardId(boardId);
+
+      return trelloRequest("GET", `/boards/${encodeURIComponent(resolvedBoardId)}`, {
         fields,
         lists,
         cards,
         labels,
         members,
-      }),
-    ),
+      });
+    }),
 );
 
 server.tool(
   "trello_list_lists",
   "List Trello lists on a board.",
   {
-    boardId: idSchema,
+    boardId: idSchema.optional(),
     filter: z.enum(["all", "closed", "none", "open"]).default("open"),
     fields: z.string().default("name,closed,pos,idBoard"),
   },
   async ({ boardId, filter, fields }) =>
-    runTool(() =>
-      trelloRequest("GET", `/boards/${encodeURIComponent(boardId)}/lists`, {
+    runTool(() => {
+      const resolvedBoardId = resolveBoardId(boardId);
+
+      return trelloRequest("GET", `/boards/${encodeURIComponent(resolvedBoardId)}/lists`, {
         filter,
         fields,
-      }),
-    ),
+      });
+    }),
 );
 
 server.tool(
   "trello_create_list",
   "Create a new list on a Trello board.",
   {
-    boardId: idSchema,
+    boardId: idSchema.optional(),
     name: z.string().min(1),
     pos: posSchema,
   },
   async ({ boardId, name, pos }) =>
-    runTool(() =>
-      trelloRequest("POST", "/lists", {
-        idBoard: boardId,
+    runTool(() => {
+      const resolvedBoardId = resolveBoardId(boardId);
+
+      return trelloRequest("POST", "/lists", {
+        idBoard: resolvedBoardId,
         name,
         pos,
-      }),
-    ),
+      });
+    }),
 );
 
 server.tool(
@@ -215,12 +233,9 @@ server.tool(
         throw new TrelloError("Provide only one of boardId or listId.");
       }
 
-      if (!boardId && !listId) {
-        throw new TrelloError("Provide boardId or listId.");
-      }
-
-      const path = boardId
-        ? `/boards/${encodeURIComponent(boardId)}/cards`
+      const resolvedBoardId = listId ? undefined : resolveBoardId(boardId);
+      const path = resolvedBoardId
+        ? `/boards/${encodeURIComponent(resolvedBoardId)}/cards`
         : `/lists/${encodeURIComponent(listId!)}/cards`;
 
       return trelloRequest("GET", path, {
