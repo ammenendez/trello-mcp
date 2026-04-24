@@ -45,6 +45,35 @@ Exemplo de configuração:
 }
 ```
 
+## Uso com Codex
+
+No Codex, configure o servidor em `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.trello]
+command = "node"
+args = ["/caminho/para/trello-mcp/dist/index.js"]
+
+[mcp_servers.trello.env]
+TRELLO_API_KEY = "sua_api_key"
+TRELLO_TOKEN = "seu_token"
+```
+
+Exemplo com caminho absoluto:
+
+```toml
+[mcp_servers.trello]
+command = "node"
+args = ["/Users/andres/Documents/projetos/trello-mcp/dist/index.js"]
+
+[mcp_servers.trello.env]
+TRELLO_API_KEY = "sua_api_key"
+TRELLO_TOKEN = "seu_token"
+```
+
+Depois de alterar o `config.toml`, reinicie a sessao do Codex. O servidor fica
+disponivel globalmente, inclusive quando voce abrir outro projeto no VS Code.
+
 ## Ferramentas disponíveis
 
 - `trello_list_boards`: lista seus boards
