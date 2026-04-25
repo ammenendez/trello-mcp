@@ -48,6 +48,19 @@ type ProductMetadata = {
   prioridade: Priority;
   score: number;
   reasons: string[];
+  appliedOverrides: string[];
+  overrideRank?: number;
+};
+
+type ProductPriorityOverride = {
+  match: string;
+  modulo?: string;
+  tipo?: ProductType;
+  impacto?: ProductLevel;
+  esforco?: ProductLevel;
+  urgencia?: UrgencyLevel;
+  prioridade?: Priority;
+  reason?: string;
 };
 
 class TrelloError extends Error {
@@ -172,6 +185,17 @@ const posSchema = z.union([z.string().min(1), z.number()]).optional();
 const levelSchema = z.enum(["alto", "medio", "baixo"]);
 const urgencySchema = z.enum(["alta", "media", "baixa"]);
 const productTypeSchema = z.enum(["feature", "bug", "refactor", "ux", "infra"]);
+const prioritySchema = z.enum(["P1", "P2", "P3"]);
+const priorityOverrideSchema = z.object({
+  match: z.string().min(1),
+  modulo: z.string().min(1).optional(),
+  tipo: productTypeSchema.optional(),
+  impacto: levelSchema.optional(),
+  esforco: levelSchema.optional(),
+  urgencia: urgencySchema.optional(),
+  prioridade: prioritySchema.optional(),
+  reason: z.string().min(1).optional(),
+});
 
 const PRODUCT_LABEL_COLORS: Record<string, string> = {
   modulo: "blue",
@@ -241,6 +265,21 @@ function calculateProductPriority(
   };
 }
 
+function scoreForForcedPriority(priority: Priority, score: number) {
+  switch (priority) {
+    case "P1":
+      return Math.max(score, 5);
+    case "P2":
+      return Math.min(Math.max(score, 3), 4);
+    case "P3":
+      return Math.min(score, 2);
+  }
+}
+
+function matchesOverride(text: string, override: ProductPriorityOverride) {
+  return includesAny(text, [override.match]);
+}
+
 function moduleFromText(text: string) {
   if (includesAny(text, ["financeiro", "pagamento", "cobranca", "assinatura", "plano", "receita", "fatura", "asaas"])) {
     return "financeiro";
@@ -298,6 +337,7 @@ function classifyProductType(text: string): ProductType {
 function classifyCardMetadata(
   card: Pick<TrelloCard, "name" | "desc">,
   manualContext = "",
+  priorityOverrides: ProductPriorityOverride[] = [],
 ): ProductMetadata {
   const text = normalizeText(`${card.name} ${card.desc ?? ""}`);
   const context = normalizeText(manualContext);
@@ -308,6 +348,9 @@ function classifyCardMetadata(
   let impacto: ProductLevel = "medio";
   let esforco: ProductLevel = "medio";
   let urgencia: UrgencyLevel = "media";
+  let forcedPriority: Priority | undefined;
+  let overrideRank: number | undefined;
+  const appliedOverrides: string[] = [];
   const isInformational = includesAny(text, [
     "o que e",
     "dicas de uso",
@@ -378,17 +421,48 @@ function classifyCardMetadata(
     reasons.push("contexto manual pede para evitar refactors nao criticos");
   }
 
-  if (isInformational) {
-    impacto = "baixo";
-    esforco = "baixo";
-    urgencia = "baixa";
+  for (const [index, override] of priorityOverrides.entries()) {
+    if (!matchesOverride(text, override)) {
+      continue;
+    }
+
+    if (overrideRank === undefined) {
+      overrideRank = index;
+    }
+    if (override.modulo) {
+      modulo = normalizeText(override.modulo).replace(/\s+/g, "-");
+    }
+    if (override.tipo) {
+      tipo = override.tipo;
+    }
+    if (override.impacto) {
+      impacto = override.impacto;
+    }
+    if (override.esforco) {
+      esforco = override.esforco;
+    }
+    if (override.urgencia) {
+      urgencia = override.urgencia;
+    }
+    if (override.prioridade) {
+      forcedPriority = override.prioridade;
+    }
+
+    const reason =
+      override.reason ??
+      `macro prioridade humana aplicada por match "${override.match}"`;
+    appliedOverrides.push(override.match);
+    reasons.push(reason);
   }
 
   const calculated = calculateProductPriority(impacto, esforco, urgencia);
   let prioridade = calculated.prioridade;
   let score = calculated.score;
 
-  if (tipo === "bug" && urgencia === "alta") {
+  if (forcedPriority) {
+    prioridade = forcedPriority;
+    score = scoreForForcedPriority(forcedPriority, score);
+  } else if (tipo === "bug" && urgencia === "alta") {
     prioridade = "P1";
     score = Math.max(score, 5);
     reasons.push("bug critico sempre entra como prioridade maxima");
@@ -407,6 +481,8 @@ function classifyCardMetadata(
     prioridade,
     score,
     reasons,
+    appliedOverrides,
+    overrideRank,
   };
 }
 
@@ -512,17 +588,19 @@ async function enrichCardMetadata({
   card,
   boardId,
   manualContext,
+  priorityOverrides,
   addComment,
   dryRun,
 }: {
   card: TrelloCard;
   boardId?: string;
   manualContext?: string;
+  priorityOverrides?: ProductPriorityOverride[];
   addComment: boolean;
   dryRun: boolean;
 }) {
   const resolvedBoardId = resolveBoardId(boardId ?? card.idBoard);
-  const metadata = classifyCardMetadata(card, manualContext);
+  const metadata = classifyCardMetadata(card, manualContext, priorityOverrides);
   const labels = metadataLabels(metadata);
   const comment = metadataComment(card, metadata);
 
@@ -856,10 +934,11 @@ server.tool(
     cardId: idSchema,
     boardId: idSchema.optional(),
     manualContext: z.string().default(""),
+    priorityOverrides: z.array(priorityOverrideSchema).default([]),
     addComment: z.boolean().default(true),
     dryRun: z.boolean().default(false),
   },
-  async ({ cardId, boardId, manualContext, addComment, dryRun }) =>
+  async ({ cardId, boardId, manualContext, priorityOverrides, addComment, dryRun }) =>
     runTool(async () => {
       const card = await getCardForProduct(cardId);
 
@@ -867,6 +946,7 @@ server.tool(
         card,
         boardId,
         manualContext,
+        priorityOverrides,
         addComment,
         dryRun,
       });
@@ -887,6 +967,7 @@ server.tool(
     maxCards: z.number().int().positive().max(50).default(10),
     maxEffortScore: z.number().int().positive().optional(),
     manualContext: z.string().default(""),
+    priorityOverrides: z.array(priorityOverrideSchema).default([]),
     enrichCards: z.boolean().default(true),
     addComment: z.boolean().default(true),
     dryRun: z.boolean().default(true),
@@ -902,6 +983,7 @@ server.tool(
     maxCards,
     maxEffortScore,
     manualContext,
+    priorityOverrides,
     enrichCards,
     addComment,
     dryRun,
@@ -951,7 +1033,11 @@ server.tool(
       const candidates = cards
         .filter((card) => card.idList && sourceIds.has(card.idList))
         .map((card, index) => {
-          const metadata = classifyCardMetadata(card, manualContext);
+          const metadata = classifyCardMetadata(
+            card,
+            manualContext,
+            priorityOverrides,
+          );
           return {
             card,
             metadata,
@@ -965,6 +1051,15 @@ server.tool(
             priorityRank(left.metadata.prioridade);
           if (priorityDelta !== 0) {
             return priorityDelta;
+          }
+
+          const leftOverrideRank =
+            left.metadata.overrideRank ?? Number.POSITIVE_INFINITY;
+          const rightOverrideRank =
+            right.metadata.overrideRank ?? Number.POSITIVE_INFINITY;
+          const overrideDelta = leftOverrideRank - rightOverrideRank;
+          if (overrideDelta !== 0) {
+            return overrideDelta;
           }
 
           const scoreDelta = right.metadata.score - left.metadata.score;
@@ -1047,6 +1142,7 @@ server.tool(
               card,
               boardId: resolvedBoardId,
               manualContext,
+              priorityOverrides,
               addComment,
               dryRun: false,
             })

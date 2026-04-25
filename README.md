@@ -133,6 +133,21 @@ O enriquecimento usa labels no formato:
 seriam selecionados antes de criar lista e mover cards. Para executar de fato,
 chame com `dryRun: false`.
 
+Use `priorityOverrides` para informar macro prioridades humanas. O MCP aplica
+essas regras aos cards que contem o texto em `match` no titulo ou descricao, e
+depois usa as regras automaticas para ordenar os cards dentro de cada grupo.
+
+Campos aceitos em cada override:
+
+- `match`: texto usado para encontrar cards
+- `modulo`: modulo que deve ser aplicado
+- `tipo`: `feature`, `bug`, `refactor`, `ux` ou `infra`
+- `impacto`: `alto`, `medio` ou `baixo`
+- `esforco`: `alto`, `medio` ou `baixo`
+- `urgencia`: `alta`, `media` ou `baixa`
+- `prioridade`: `P1`, `P2` ou `P3`
+- `reason`: justificativa adicionada ao comentario do card
+
 Exemplo de planejamento sem mover cards:
 
 ```json
@@ -144,6 +159,24 @@ Exemplo de planejamento sem mover cards:
   "endDate": "2026-05-15",
   "maxCards": 10,
   "manualContext": "Focar no modulo financeiro e evitar refactors nao criticos",
+  "priorityOverrides": [
+    {
+      "match": "planilha",
+      "modulo": "financeiro",
+      "impacto": "alto",
+      "urgencia": "alta",
+      "prioridade": "P1",
+      "reason": "Refazer planilhas e uma macro prioridade humana deste ciclo"
+    },
+    {
+      "match": "garmin",
+      "modulo": "integracoes",
+      "impacto": "medio",
+      "urgencia": "media",
+      "prioridade": "P2",
+      "reason": "Integracao Garmin e importante, mas nao bloqueia o ciclo atual"
+    }
+  ],
   "dryRun": true
 }
 ```
