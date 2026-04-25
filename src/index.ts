@@ -13,6 +13,7 @@ type Priority = "P1" | "P2" | "P3";
 type ProductLevel = "alto" | "medio" | "baixo";
 type UrgencyLevel = "alta" | "media" | "baixa";
 type ProductType = "feature" | "bug" | "refactor" | "ux" | "infra";
+type TechnicalLayer = "backend" | "frontend" | "mobile" | "unknown";
 
 type TrelloLabel = {
   id: string;
@@ -47,6 +48,8 @@ type ProductMetadata = {
   urgencia: UrgencyLevel;
   prioridade: Priority;
   score: number;
+  technicalLayer: TechnicalLayer;
+  technicalLayerRank: number;
   reasons: string[];
   appliedOverrides: string[];
   overrideRank?: number;
@@ -334,6 +337,33 @@ function classifyProductType(text: string): ProductType {
   return "feature";
 }
 
+function classifyTechnicalLayer(text: string): TechnicalLayer {
+  if (includesAny(text, ["back", "backend", "api", "endpoint", "server", "servidor"])) {
+    return "backend";
+  }
+  if (includesAny(text, ["front", "frontend", "web", "tela", "formulario", "interface"])) {
+    return "frontend";
+  }
+  if (includesAny(text, ["mobile", "app", "android", "ios"])) {
+    return "mobile";
+  }
+
+  return "unknown";
+}
+
+function technicalLayerRank(layer: TechnicalLayer) {
+  switch (layer) {
+    case "backend":
+      return 1;
+    case "frontend":
+      return 2;
+    case "mobile":
+      return 3;
+    case "unknown":
+      return 4;
+  }
+}
+
 function classifyCardMetadata(
   card: Pick<TrelloCard, "name" | "desc">,
   manualContext = "",
@@ -345,6 +375,8 @@ function classifyCardMetadata(
   const reasons: string[] = [];
   let modulo = classifyModule(text, context);
   let tipo = classifyProductType(text);
+  const technicalLayer = classifyTechnicalLayer(text);
+  const layerRank = technicalLayerRank(technicalLayer);
   let impacto: ProductLevel = "medio";
   let esforco: ProductLevel = "medio";
   let urgencia: UrgencyLevel = "media";
@@ -480,6 +512,8 @@ function classifyCardMetadata(
     urgencia,
     prioridade,
     score,
+    technicalLayer,
+    technicalLayerRank: layerRank,
     reasons,
     appliedOverrides,
     overrideRank,
@@ -507,6 +541,7 @@ function metadataComment(card: TrelloCard, metadata: ProductMetadata) {
     `- Esforco: ${metadata.esforco}`,
     `- Urgencia: ${metadata.urgencia}`,
     `- Prioridade: ${metadata.prioridade} (score ${metadata.score})`,
+    `- Camada tecnica: ${metadata.technicalLayer}`,
     "",
     `Justificativa: ${metadata.reasons.join("; ")}.`,
   ].join("\n");
@@ -1060,6 +1095,12 @@ server.tool(
           const overrideDelta = leftOverrideRank - rightOverrideRank;
           if (overrideDelta !== 0) {
             return overrideDelta;
+          }
+
+          const layerDelta =
+            left.metadata.technicalLayerRank - right.metadata.technicalLayerRank;
+          if (layerDelta !== 0) {
+            return layerDelta;
           }
 
           const scoreDelta = right.metadata.score - left.metadata.score;

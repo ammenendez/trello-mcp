@@ -137,6 +137,16 @@ Use `priorityOverrides` para informar macro prioridades humanas. O MCP aplica
 essas regras aos cards que contem o texto em `match` no titulo ou descricao, e
 depois usa as regras automaticas para ordenar os cards dentro de cada grupo.
 
+Por padrao, quando uma macro atividade tiver cards de mais de uma camada tecnica,
+o MCP ordena assim:
+
+1. backend / back / api
+2. frontend / front / web
+3. mobile / app
+4. demais cards
+
+Ou seja: se uma macro atividade tiver back e front, o back vem antes.
+
 Campos aceitos em cada override:
 
 - `match`: texto usado para encontrar cards
