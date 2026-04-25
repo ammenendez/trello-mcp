@@ -100,6 +100,8 @@ prioridade. Se `boardId` nao for informado, o MCP usa
 
 ## Ferramentas disponíveis
 
+### Trello básico
+
 - `trello_list_boards`: lista seus boards
 - `trello_get_board`: busca detalhes de um board; usa `TRELLO_DEFAULT_BOARD_ID` se `boardId` nao for informado
 - `trello_list_lists`: lista listas de um board; usa `TRELLO_DEFAULT_BOARD_ID` se `boardId` nao for informado
@@ -111,6 +113,53 @@ prioridade. Se `boardId` nao for informado, o MCP usa
 - `trello_move_card`: move um card para outra lista
 - `trello_add_comment`: adiciona comentário a um card
 - `trello_archive_card`: arquiva ou desarquiva um card
+
+### Produto e sprint
+
+- `calculate_priority`: calcula prioridade usando `impacto + urgencia - esforco`
+- `enrich_card_metadata`: classifica um card existente, cria labels se necessario, adiciona labels ao card e comenta a justificativa
+- `build_sprint`: sugere ou monta uma sprint a partir de cards existentes no backlog
+
+O enriquecimento usa labels no formato:
+
+- `modulo:financeiro`
+- `tipo:feature`
+- `impacto:alto`
+- `esforco:medio`
+- `urgencia:alta`
+- `prioridade:P1`
+
+`build_sprint` usa `dryRun: true` por padrao. Assim voce pode revisar quais cards
+seriam selecionados antes de criar lista e mover cards. Para executar de fato,
+chame com `dryRun: false`.
+
+Exemplo de planejamento sem mover cards:
+
+```json
+{
+  "boardId": "id_do_board",
+  "sourceListNames": ["Backlog"],
+  "sprintNumber": 2,
+  "startDate": "2026-05-01",
+  "endDate": "2026-05-15",
+  "maxCards": 10,
+  "manualContext": "Focar no modulo financeiro e evitar refactors nao criticos",
+  "dryRun": true
+}
+```
+
+Exemplo para montar a sprint:
+
+```json
+{
+  "boardId": "id_do_board",
+  "sourceListNames": ["Backlog"],
+  "sprintListName": "Sprint 02 - 2026-05-01 a 2026-05-15",
+  "maxCards": 10,
+  "manualContext": "Focar no modulo financeiro e postergar integracoes externas",
+  "dryRun": false
+}
+```
 
 ## Segurança
 
