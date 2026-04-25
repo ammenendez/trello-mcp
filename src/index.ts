@@ -40,6 +40,14 @@ type TrelloCard = {
   labels?: TrelloLabel[];
 };
 
+type TrelloAction = {
+  id: string;
+  date: string;
+  data?: {
+    text?: string;
+  };
+};
+
 type ProductMetadata = {
   modulo: string;
   tipo: ProductType;
@@ -64,6 +72,25 @@ type ProductPriorityOverride = {
   urgencia?: UrgencyLevel;
   prioridade?: Priority;
   reason?: string;
+};
+
+type ContractRecord = {
+  contractId: string;
+  version: string;
+  producerCardId: string;
+  title?: string;
+  contractText: string;
+  actionId?: string;
+  publishedAt?: string;
+};
+
+type ContractConsumerRecord = {
+  contractId: string;
+  version: string;
+  producerCardId: string;
+  consumerCardId: string;
+  actionId?: string;
+  linkedAt?: string;
 };
 
 class TrelloError extends Error {
@@ -207,7 +234,12 @@ const PRODUCT_LABEL_COLORS: Record<string, string> = {
   esforco: "orange",
   urgencia: "yellow",
   prioridade: "green",
+  contrato: "sky",
+  "contrato-versao": "lime",
 };
+
+const CONTRACT_MARKER = "mcp-contract";
+const CONTRACT_CONSUMER_MARKER = "mcp-contract-consumer";
 
 function normalizeText(value: string | undefined) {
   return (value ?? "")
@@ -697,6 +729,189 @@ function priorityRank(priority: Priority) {
 function listNameMatches(listName: string, matchers: string[]) {
   const normalizedListName = normalizeText(listName);
   return matchers.some((matcher) => normalizedListName.includes(normalizeText(matcher)));
+}
+
+function parseMetadataBlock(block: string) {
+  const metadata: Record<string, string> = {};
+
+  for (const line of block.split(/\r?\n/)) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (key) {
+      metadata[key] = value;
+    }
+  }
+
+  return metadata;
+}
+
+function formatContractComment({
+  contractId,
+  version,
+  producerCardId,
+  title,
+  contractText,
+}: {
+  contractId: string;
+  version: string;
+  producerCardId: string;
+  title?: string;
+  contractText: string;
+}) {
+  const header = [
+    `<!-- ${CONTRACT_MARKER}`,
+    `contract_id: ${contractId}`,
+    `version: ${version}`,
+    `producer_card: ${producerCardId}`,
+    title ? `title: ${title}` : undefined,
+    "-->",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return `${header}\n\n${contractText}`;
+}
+
+function parseContractComment(
+  text: string | undefined,
+  action?: Pick<TrelloAction, "id" | "date">,
+): ContractRecord | undefined {
+  if (!text?.includes(`<!-- ${CONTRACT_MARKER}`)) {
+    return undefined;
+  }
+
+  const match = text.match(
+    new RegExp(`<!-- ${CONTRACT_MARKER}\\n([\\s\\S]*?)\\n-->\\n?\\n?([\\s\\S]*)`),
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const metadata = parseMetadataBlock(match[1] ?? "");
+  const contractId = metadata.contract_id;
+  const version = metadata.version;
+  const producerCardId = metadata.producer_card;
+
+  if (!contractId || !version || !producerCardId) {
+    return undefined;
+  }
+
+  return {
+    contractId,
+    version,
+    producerCardId,
+    title: metadata.title,
+    contractText: (match[2] ?? "").trim(),
+    actionId: action?.id,
+    publishedAt: action?.date,
+  };
+}
+
+function formatContractConsumerComment({
+  contractId,
+  version,
+  producerCardId,
+  consumerCardId,
+}: ContractConsumerRecord) {
+  return [
+    `<!-- ${CONTRACT_CONSUMER_MARKER}`,
+    `contract_id: ${contractId}`,
+    `version: ${version}`,
+    `producer_card: ${producerCardId}`,
+    `consumer_card: ${consumerCardId}`,
+    "-->",
+    "",
+    `Contrato usado: ${contractId}`,
+    `Versao: ${version}`,
+    `Card produtor: ${producerCardId}`,
+  ].join("\n");
+}
+
+function parseContractConsumerComment(
+  text: string | undefined,
+  action?: Pick<TrelloAction, "id" | "date">,
+): ContractConsumerRecord | undefined {
+  if (!text?.includes(`<!-- ${CONTRACT_CONSUMER_MARKER}`)) {
+    return undefined;
+  }
+
+  const match = text.match(
+    new RegExp(`<!-- ${CONTRACT_CONSUMER_MARKER}\\n([\\s\\S]*?)\\n-->`),
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  const metadata = parseMetadataBlock(match[1] ?? "");
+  const contractId = metadata.contract_id;
+  const version = metadata.version;
+  const producerCardId = metadata.producer_card;
+  const consumerCardId = metadata.consumer_card;
+
+  if (!contractId || !version || !producerCardId || !consumerCardId) {
+    return undefined;
+  }
+
+  return {
+    contractId,
+    version,
+    producerCardId,
+    consumerCardId,
+    actionId: action?.id,
+    linkedAt: action?.date,
+  };
+}
+
+async function getCardComments(cardId: string) {
+  return trelloRequest<TrelloAction[]>(
+    "GET",
+    `/cards/${encodeURIComponent(cardId)}/actions`,
+    {
+      filter: "commentCard",
+      fields: "data,date",
+      limit: 1000,
+    },
+  );
+}
+
+async function getPublishedContracts(cardId: string) {
+  const comments = await getCardComments(cardId);
+  return comments
+    .map((action) => parseContractComment(action.data?.text, action))
+    .filter((contract): contract is ContractRecord => Boolean(contract))
+    .sort((left, right) =>
+      (right.publishedAt ?? "").localeCompare(left.publishedAt ?? ""),
+    );
+}
+
+async function getLatestContract(cardId: string, contractId?: string) {
+  const contracts = await getPublishedContracts(cardId);
+  const contract = contractId
+    ? contracts.find((item) => item.contractId === contractId)
+    : contracts[0];
+
+  if (!contract) {
+    throw new TrelloError(
+      contractId
+        ? `No contract "${contractId}" found on card ${cardId}.`
+        : `No contract found on card ${cardId}.`,
+    );
+  }
+
+  return contract;
+}
+
+async function getContractConsumers(cardId: string) {
+  const comments = await getCardComments(cardId);
+  return comments
+    .map((action) => parseContractConsumerComment(action.data?.text, action))
+    .filter((consumer): consumer is ContractConsumerRecord => Boolean(consumer))
+    .sort((left, right) => (right.linkedAt ?? "").localeCompare(left.linkedAt ?? ""));
 }
 
 const server = new McpServer({
@@ -1216,6 +1431,207 @@ server.tool(
           moved: updatedCards.length,
           effortScore: effortTotal,
         },
+      };
+    }),
+);
+
+server.tool(
+  "publish_contract",
+  "Publish a markdown contract as a structured comment on a backend Trello card.",
+  {
+    producerCardId: idSchema,
+    contractId: z.string().min(1),
+    version: z.string().min(1),
+    contractText: z.string().min(1),
+    title: z.string().min(1).optional(),
+    dryRun: z.boolean().default(false),
+  },
+  async ({ producerCardId, contractId, version, contractText, title, dryRun }) =>
+    runTool(async () => {
+      const comment = formatContractComment({
+        contractId,
+        version,
+        producerCardId,
+        title,
+        contractText,
+      });
+
+      if (dryRun) {
+        return {
+          dryRun: true,
+          contract: {
+            contractId,
+            version,
+            producerCardId,
+            title,
+            contractText,
+          },
+          comment,
+        };
+      }
+
+      const action = await trelloRequest<TrelloAction>(
+        "POST",
+        `/cards/${encodeURIComponent(producerCardId)}/actions/comments`,
+        {
+          text: comment,
+        },
+      );
+
+      return {
+        dryRun: false,
+        contract: {
+          contractId,
+          version,
+          producerCardId,
+          title,
+          contractText,
+          actionId: action.id,
+          publishedAt: action.date,
+        },
+      };
+    }),
+);
+
+server.tool(
+  "get_card_contract",
+  "Read the latest structured contract published on a Trello card.",
+  {
+    producerCardId: idSchema,
+    contractId: z.string().min(1).optional(),
+  },
+  async ({ producerCardId, contractId }) =>
+    runTool(async () => getLatestContract(producerCardId, contractId)),
+);
+
+server.tool(
+  "link_contract_consumer",
+  "Mark a frontend or mobile card as a consumer of a backend contract.",
+  {
+    consumerCardId: idSchema,
+    producerCardId: idSchema,
+    boardId: idSchema.optional(),
+    contractId: z.string().min(1).optional(),
+    version: z.string().min(1).optional(),
+    addLabels: z.boolean().default(true),
+    dryRun: z.boolean().default(false),
+  },
+  async ({
+    consumerCardId,
+    producerCardId,
+    boardId,
+    contractId,
+    version,
+    addLabels,
+    dryRun,
+  }) =>
+    runTool(async () => {
+      const producerContract =
+        contractId && version
+          ? undefined
+          : await getLatestContract(producerCardId, contractId);
+      const resolvedContractId = contractId ?? producerContract!.contractId;
+      const resolvedVersion = version ?? producerContract!.version;
+      const consumerRecord: ContractConsumerRecord = {
+        contractId: resolvedContractId,
+        version: resolvedVersion,
+        producerCardId,
+        consumerCardId,
+      };
+      const comment = formatContractConsumerComment(consumerRecord);
+      const labels = [
+        `contrato:${resolvedContractId}`,
+        `contrato-versao:${resolvedVersion}`,
+      ];
+
+      if (dryRun) {
+        return {
+          dryRun: true,
+          consumer: consumerRecord,
+          labels: addLabels ? labels : [],
+          comment,
+        };
+      }
+
+      const consumerCard = await getCardForProduct(consumerCardId);
+      const resolvedBoardId = resolveBoardId(boardId ?? consumerCard.idBoard);
+      const action = await trelloRequest<TrelloAction>(
+        "POST",
+        `/cards/${encodeURIComponent(consumerCardId)}/actions/comments`,
+        {
+          text: comment,
+        },
+      );
+      const addedLabels = addLabels
+        ? await addLabelsToCard(
+            consumerCard,
+            await ensureBoardLabels(resolvedBoardId, labels),
+          )
+        : [];
+
+      return {
+        dryRun: false,
+        consumer: {
+          ...consumerRecord,
+          actionId: action.id,
+          linkedAt: action.date,
+        },
+        labels: labels,
+        addedLabels: addedLabels.map((label) => label.name),
+      };
+    }),
+);
+
+server.tool(
+  "find_contract_consumers",
+  "Find Trello cards linked as consumers of a contract.",
+  {
+    contractId: z.string().min(1),
+    boardId: idSchema.optional(),
+    version: z.string().min(1).optional(),
+    includeClosed: z.boolean().default(false),
+  },
+  async ({ contractId, boardId, version, includeClosed }) =>
+    runTool(async () => {
+      const resolvedBoardId = resolveBoardId(boardId);
+      const cards = await trelloRequest<TrelloCard[]>(
+        "GET",
+        `/boards/${encodeURIComponent(resolvedBoardId)}/cards`,
+        {
+          filter: includeClosed ? "all" : "open",
+          fields: "name,url,closed,idBoard,idList,idLabels,labels",
+        },
+      );
+      const consumers = [];
+
+      for (const card of cards) {
+        const cardConsumers = await getContractConsumers(card.id);
+        for (const consumer of cardConsumers) {
+          if (consumer.contractId !== contractId) {
+            continue;
+          }
+          if (version && consumer.version !== version) {
+            continue;
+          }
+
+          consumers.push({
+            card: {
+              id: card.id,
+              name: card.name,
+              url: card.url,
+              closed: card.closed,
+            },
+            consumer,
+          });
+        }
+      }
+
+      return {
+        contractId,
+        version,
+        boardId: resolvedBoardId,
+        count: consumers.length,
+        consumers,
       };
     }),
 );

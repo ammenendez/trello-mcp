@@ -119,6 +119,10 @@ prioridade. Se `boardId` nao for informado, o MCP usa
 - `calculate_priority`: calcula prioridade usando `impacto + urgencia - esforco`
 - `enrich_card_metadata`: classifica um card existente, cria labels se necessario, adiciona labels ao card e comenta a justificativa
 - `build_sprint`: sugere ou monta uma sprint a partir de cards existentes no backlog
+- `publish_contract`: publica um contrato markdown em um card de backend
+- `get_card_contract`: le o contrato publicado em um card de backend
+- `link_contract_consumer`: vincula um card de front/mobile ao contrato do backend
+- `find_contract_consumers`: encontra cards que usam um contrato
 
 O enriquecimento usa labels no formato:
 
@@ -203,6 +207,60 @@ Exemplo para montar a sprint:
   "dryRun": false
 }
 ```
+
+### Contratos backend -> front/mobile
+
+Contratos sao salvos como comentarios estruturados no Trello. O card de backend
+publica o contrato, e os cards de front/mobile sao marcados como consumidores
+desse contrato.
+
+Publicar contrato no card de backend:
+
+```json
+{
+  "producerCardId": "id_card_backend",
+  "contractId": "asaas-por-clube",
+  "version": "1.0.0",
+  "title": "Contrato Asaas por Clube",
+  "contractText": "# Contrato Asaas por Clube\n\n## Endpoint\nGET /clubs/:clubId/asaas-config",
+  "dryRun": false
+}
+```
+
+Ler contrato do card de backend:
+
+```json
+{
+  "producerCardId": "id_card_backend",
+  "contractId": "asaas-por-clube"
+}
+```
+
+Vincular um card de front/mobile ao contrato:
+
+```json
+{
+  "consumerCardId": "id_card_front",
+  "producerCardId": "id_card_backend",
+  "contractId": "asaas-por-clube",
+  "version": "1.0.0",
+  "dryRun": false
+}
+```
+
+Encontrar todos os consumidores de um contrato:
+
+```json
+{
+  "boardId": "id_do_board",
+  "contractId": "asaas-por-clube"
+}
+```
+
+O vinculo adiciona labels no card consumidor:
+
+- `contrato:asaas-por-clube`
+- `contrato-versao:1.0.0`
 
 ## Segurança
 
