@@ -1120,6 +1120,37 @@ server.tool(
 );
 
 server.tool(
+  "trello_add_member_to_card",
+  "Assign a Trello member to an existing card.",
+  {
+    cardId: idSchema,
+    memberId: idSchema,
+  },
+  async ({ cardId, memberId }) =>
+    runTool(() =>
+      trelloRequest("POST", `/cards/${encodeURIComponent(cardId)}/idMembers`, {
+        value: memberId,
+      }),
+    ),
+);
+
+server.tool(
+  "trello_remove_member_from_card",
+  "Remove a Trello member from an existing card.",
+  {
+    cardId: idSchema,
+    memberId: idSchema,
+  },
+  async ({ cardId, memberId }) =>
+    runTool(() =>
+      trelloRequest(
+        "DELETE",
+        `/cards/${encodeURIComponent(cardId)}/idMembers/${encodeURIComponent(memberId)}`,
+      ),
+    ),
+);
+
+server.tool(
   "trello_add_comment",
   "Add a comment to a Trello card.",
   {

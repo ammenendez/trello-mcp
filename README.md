@@ -111,6 +111,8 @@ prioridade. Se `boardId` nao for informado, o MCP usa
 - `trello_create_card`: cria um card
 - `trello_update_card`: atualiza nome, descrição, lista, vencimento ou status de um card
 - `trello_move_card`: move um card para outra lista
+- `trello_add_member_to_card`: atribui um membro a um card existente
+- `trello_remove_member_from_card`: remove um membro de um card existente
 - `trello_add_comment`: adiciona comentário a um card
 - `trello_archive_card`: arquiva ou desarquiva um card
 
