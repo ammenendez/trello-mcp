@@ -121,7 +121,7 @@ prioridade. Se `boardId` nao for informado, o MCP usa
 - `calculate_priority`: calcula prioridade usando `impacto + urgencia - esforco`
 - `enrich_card_metadata`: classifica um card existente, cria labels se necessario, adiciona labels ao card e comenta a justificativa
 - `build_sprint`: sugere ou monta uma sprint a partir de cards existentes no backlog
-- `publish_contract`: publica um contrato markdown em um card de backend
+- `publish_contract`: publica um contrato markdown em um card de backend, usando anexo para contratos grandes
 - `get_card_contract`: le o contrato publicado em um card de backend
 - `link_contract_consumer`: vincula um card de front/mobile ao contrato do backend
 - `find_contract_consumers`: encontra cards que usam um contrato
@@ -212,9 +212,10 @@ Exemplo para montar a sprint:
 
 ### Contratos backend -> front/mobile
 
-Contratos sao salvos como comentarios estruturados no Trello. O card de backend
-publica o contrato, e os cards de front/mobile sao marcados como consumidores
-desse contrato.
+Contratos pequenos sao salvos como comentarios estruturados no Trello. Contratos
+grandes podem ser salvos como anexo markdown; nesse caso o comentario fica como
+indice com os metadados do contrato. O card de backend publica o contrato, e os
+cards de front/mobile sao marcados como consumidores desse contrato.
 
 Publicar contrato no card de backend:
 
@@ -225,9 +226,15 @@ Publicar contrato no card de backend:
   "version": "1.0.0",
   "title": "Contrato Asaas por Clube",
   "contractText": "# Contrato Asaas por Clube\n\n## Endpoint\nGET /clubs/:clubId/asaas-config",
+  "storage": "auto",
   "dryRun": false
 }
 ```
+
+`storage` pode ser `auto`, `comment` ou `attachment`. Em `auto`, contratos com
+mais de 12000 caracteres sao enviados como arquivo `.md` anexado ao card. Para
+forcar anexo, use `"storage": "attachment"`; opcionalmente envie
+`"attachmentName": "contrato-asaas-1.0.0.md"`.
 
 Ler contrato do card de backend:
 

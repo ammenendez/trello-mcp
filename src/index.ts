@@ -48,6 +48,15 @@ type TrelloAction = {
   };
 };
 
+type TrelloAttachment = {
+  id: string;
+  name: string;
+  url: string;
+  bytes?: number;
+  date?: string;
+  mimeType?: string;
+};
+
 type ProductMetadata = {
   modulo: string;
   tipo: ProductType;
@@ -80,6 +89,12 @@ type ContractRecord = {
   producerCardId: string;
   title?: string;
   contractText: string;
+  storage?: "comment" | "attachment";
+  attachmentId?: string;
+  attachmentName?: string;
+  attachmentUrl?: string;
+  attachmentBytes?: number;
+  attachmentMimeType?: string;
   actionId?: string;
   publishedAt?: string;
 };
@@ -192,6 +207,67 @@ async function trelloRequest<T>(
   }
 }
 
+async function trelloFormRequest<T>(
+  method: "POST",
+  path: string,
+  form: FormData,
+): Promise<T> {
+  const url = new URL(`${TRELLO_API_BASE}${path}`);
+  appendParams(url);
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Accept: "application/json",
+    },
+    body: form,
+  });
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new TrelloError(
+      `Trello request failed: ${method} ${path}`,
+      response.status,
+      responseText,
+    );
+  }
+
+  if (!responseText) {
+    return undefined as T;
+  }
+
+  try {
+    return JSON.parse(responseText) as T;
+  } catch {
+    return responseText as T;
+  }
+}
+
+async function trelloTextFromUrl(urlValue: string) {
+  const url = new URL(urlValue);
+  if (url.hostname === "trello.com" || url.hostname.endsWith(".trello.com")) {
+    appendParams(url);
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: "text/markdown,text/plain,*/*",
+    },
+  });
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new TrelloError(
+      `Trello attachment download failed: ${url.pathname}`,
+      response.status,
+      responseText,
+    );
+  }
+
+  return responseText;
+}
+
 async function runTool<T>(operation: () => Promise<T>) {
   try {
     return toolText(await operation());
@@ -240,6 +316,7 @@ const PRODUCT_LABEL_COLORS: Record<string, string> = {
 
 const CONTRACT_MARKER = "mcp-contract";
 const CONTRACT_CONSUMER_MARKER = "mcp-contract-consumer";
+const CONTRACT_ATTACHMENT_THRESHOLD = 12000;
 
 function normalizeText(value: string | undefined) {
   return (value ?? "")
@@ -756,23 +833,43 @@ function formatContractComment({
   producerCardId,
   title,
   contractText,
+  storage,
+  attachmentId,
+  attachmentName,
+  attachmentBytes,
+  attachmentMimeType,
 }: {
   contractId: string;
   version: string;
   producerCardId: string;
   title?: string;
   contractText: string;
+  storage?: "comment" | "attachment";
+  attachmentId?: string;
+  attachmentName?: string;
+  attachmentBytes?: number;
+  attachmentMimeType?: string;
 }) {
+  const usesAttachment = storage === "attachment" || Boolean(attachmentId);
   const header = [
     `<!-- ${CONTRACT_MARKER}`,
     `contract_id: ${contractId}`,
     `version: ${version}`,
     `producer_card: ${producerCardId}`,
     title ? `title: ${title}` : undefined,
+    usesAttachment ? "storage: attachment" : "storage: comment",
+    attachmentId ? `attachment_id: ${attachmentId}` : undefined,
+    attachmentName ? `attachment_name: ${attachmentName}` : undefined,
+    attachmentBytes !== undefined ? `attachment_bytes: ${attachmentBytes}` : undefined,
+    attachmentMimeType ? `attachment_mime_type: ${attachmentMimeType}` : undefined,
     "-->",
   ]
     .filter(Boolean)
     .join("\n");
+
+  if (usesAttachment) {
+    return `${header}\n\nContrato publicado como anexo: ${attachmentName ?? attachmentId}`;
+  }
 
   return `${header}\n\n${contractText}`;
 }
@@ -806,9 +903,66 @@ function parseContractComment(
     version,
     producerCardId,
     title: metadata.title,
-    contractText: (match[2] ?? "").trim(),
+    contractText: metadata.attachment_id ? "" : (match[2] ?? "").trim(),
+    storage: metadata.attachment_id ? "attachment" : "comment",
+    attachmentId: metadata.attachment_id,
+    attachmentName: metadata.attachment_name,
+    attachmentBytes: metadata.attachment_bytes
+      ? Number(metadata.attachment_bytes)
+      : undefined,
+    attachmentMimeType: metadata.attachment_mime_type,
     actionId: action?.id,
     publishedAt: action?.date,
+  };
+}
+
+function sanitizeContractFilename(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function defaultContractAttachmentName(contractId: string, version: string) {
+  const safeContractId = sanitizeContractFilename(contractId) || "contract";
+  const safeVersion = sanitizeContractFilename(version) || "version";
+  return `${safeContractId}-${safeVersion}.md`;
+}
+
+async function uploadContractAttachment(
+  cardId: string,
+  contractText: string,
+  attachmentName: string,
+) {
+  const form = new FormData();
+  const file = new Blob([contractText], { type: "text/markdown" });
+  form.append("file", file, attachmentName);
+  form.append("name", attachmentName);
+  form.append("mimeType", "text/markdown");
+
+  return trelloFormRequest<TrelloAttachment>(
+    "POST",
+    `/cards/${encodeURIComponent(cardId)}/attachments`,
+    form,
+  );
+}
+
+async function downloadContractAttachment(cardId: string, attachmentId: string) {
+  const attachment = await trelloRequest<TrelloAttachment>(
+    "GET",
+    `/cards/${encodeURIComponent(cardId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    {
+      fields: "id,name,url,bytes,date,mimeType",
+    },
+  );
+  const contractText = await trelloTextFromUrl(attachment.url);
+
+  return {
+    contractText,
+    attachment,
   };
 }
 
@@ -891,11 +1045,11 @@ async function getPublishedContracts(cardId: string) {
 
 async function getLatestContract(cardId: string, contractId?: string) {
   const contracts = await getPublishedContracts(cardId);
-  const contract = contractId
+  const contractRecord = contractId
     ? contracts.find((item) => item.contractId === contractId)
     : contracts[0];
 
-  if (!contract) {
+  if (!contractRecord) {
     throw new TrelloError(
       contractId
         ? `No contract "${contractId}" found on card ${cardId}.`
@@ -903,7 +1057,23 @@ async function getLatestContract(cardId: string, contractId?: string) {
     );
   }
 
-  return contract;
+  if (contractRecord.attachmentId) {
+    const { contractText, attachment } = await downloadContractAttachment(
+      cardId,
+      contractRecord.attachmentId,
+    );
+
+    return {
+      ...contractRecord,
+      contractText,
+      attachmentName: attachment.name,
+      attachmentUrl: attachment.url,
+      attachmentBytes: attachment.bytes,
+      attachmentMimeType: attachment.mimeType,
+    };
+  }
+
+  return contractRecord;
 }
 
 async function getContractConsumers(cardId: string) {
@@ -1468,34 +1638,74 @@ server.tool(
 
 server.tool(
   "publish_contract",
-  "Publish a markdown contract as a structured comment on a backend Trello card.",
+  "Publish a markdown contract on a backend Trello card, using an attachment for large contracts.",
   {
     producerCardId: idSchema,
     contractId: z.string().min(1),
     version: z.string().min(1),
     contractText: z.string().min(1),
     title: z.string().min(1).optional(),
+    storage: z.enum(["auto", "comment", "attachment"]).default("auto"),
+    attachmentName: z.string().min(1).optional(),
     dryRun: z.boolean().default(false),
   },
-  async ({ producerCardId, contractId, version, contractText, title, dryRun }) =>
+  async ({
+    producerCardId,
+    contractId,
+    version,
+    contractText,
+    title,
+    storage,
+    attachmentName,
+    dryRun,
+  }) =>
     runTool(async () => {
+      const shouldAttach =
+        storage === "attachment" ||
+        (storage === "auto" && contractText.length > CONTRACT_ATTACHMENT_THRESHOLD);
+      const resolvedAttachmentName =
+        attachmentName ?? defaultContractAttachmentName(contractId, version);
+      const uploadedAttachment =
+        shouldAttach && !dryRun
+          ? await uploadContractAttachment(
+              producerCardId,
+              contractText,
+              resolvedAttachmentName,
+            )
+          : undefined;
       const comment = formatContractComment({
         contractId,
         version,
         producerCardId,
         title,
-        contractText,
+        contractText: shouldAttach ? "" : contractText,
+        storage: shouldAttach ? "attachment" : "comment",
+        attachmentId: uploadedAttachment?.id,
+        attachmentName: shouldAttach ? resolvedAttachmentName : undefined,
+        attachmentBytes: uploadedAttachment?.bytes,
+        attachmentMimeType:
+          uploadedAttachment?.mimeType ??
+          (shouldAttach ? "text/markdown" : undefined),
       });
 
       if (dryRun) {
         return {
           dryRun: true,
+          storage: shouldAttach ? "attachment" : "comment",
+          attachment: shouldAttach
+            ? {
+                name: resolvedAttachmentName,
+                mimeType: "text/markdown",
+              }
+            : undefined,
           contract: {
             contractId,
             version,
             producerCardId,
             title,
             contractText,
+            storage: shouldAttach ? "attachment" : "comment",
+            attachmentName: shouldAttach ? resolvedAttachmentName : undefined,
           },
           comment,
         };
@@ -1517,6 +1727,12 @@ server.tool(
           producerCardId,
           title,
           contractText,
+          storage: shouldAttach ? "attachment" : "comment",
+          attachmentId: uploadedAttachment?.id,
+          attachmentName: uploadedAttachment?.name,
+          attachmentUrl: uploadedAttachment?.url,
+          attachmentBytes: uploadedAttachment?.bytes,
+          attachmentMimeType: uploadedAttachment?.mimeType,
           actionId: action.id,
           publishedAt: action.date,
         },
